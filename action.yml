@@ -1,0 +1,73 @@
+name: Deno Outdated Action
+description: "Automatically update Deno dependencies"
+author: "William Horning"
+
+branding:
+  icon: "refresh-cw"
+  color: "blue"
+
+inputs:
+  branch_name:
+    description: "Branch name to use when making a pull request"
+    required: false
+    default: "chore/deps-update"
+  commit_message:
+    description: "Commit message to use when updating files"
+    required: false
+    default: "chore(deps): update Deno dependencies"
+  deno_version:
+    description: "Deno version to use"
+    required: false
+    default: "2.x"
+  github_token:
+    description: "GitHub token"
+    required: false
+    default: ${{ github.token }}
+  pull_request_title:
+    description: "Pull request title to use when updating files"
+    required: false
+    default: "chore(deps): update Deno dependencies"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        show-progress: false
+    - name: Download Deno
+      uses: denoland/setup-deno@v2
+      with:
+        deno-version: ${{ inputs.deno_version }}
+    - name: Check outdated dependencies
+      shell: bash
+      run: |
+        export NO_COLOR=1 &&
+        echo "\`\`\`" > /tmp/deno_outdated.md &&
+        deno outdated >> /tmp/deno_outdated.md 2>/dev/null &&
+        echo "\`\`\`" >> /tmp/deno_outdated.md &&
+        cat /tmp/deno_outdated.md
+    - name: Update dependencies
+      shell: bash
+      run: deno outdated --update > /dev/null 2>&1
+    - name: Commit changes and make a pull request
+      shell: bash
+      run: |
+        if ! git diff --exit-code; then
+          echo "# Deno Outdated" >> $GITHUB_STEP_SUMMARY
+          echo "Nothing to commit--everything's up to date" >> $GITHUB_STEP_SUMMARY
+          exit 0
+        else
+          echo "# Deno Outdated" >> $GITHUB_STEP_SUMMARY
+          echo "New versions detected:" >> $GITHUB_STEP_SUMMARY
+          cat /tmp/deno_outdated.md >> $GITHUB_STEP_SUMMARY
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git checkout -b "${{ inputs.branch_name }}" > /dev/null 2>&1
+          git add .
+          git commit -m "${{ inputs.commit_message }}" > /dev/null 2>&1
+          git push --force origin "${{ inputs.branch_name }}" > /dev/null 2>&1
+          gh pr create --title "${{ inputs.pull_request_title }}" -F $GITHUB_STEP_SUMMARY -B main -H "${{ inputs.branch_name }}"
+        fi
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
